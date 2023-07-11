@@ -1,0 +1,6 @@
+gutenbergpy==0.3.5
+nltk==3.8.1
+halo==0.0.31
+llama-cpp-python>=0.1.70
+tqdm==4.65.0
+quoters==0.30
