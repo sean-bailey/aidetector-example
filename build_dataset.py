@@ -159,13 +159,23 @@ def main():
         aisentgroup=[]
         booklist.reverse()
         if args.aigen:
+            llm=None
             if args.model:
                 llm = Llama(model_path=args.model,verbose=False)
             pbar = tqdm(finalsentgroup, desc="Generating AI Output")
             for i, sent in enumerate(pbar):
                 #we want to generate the same _amount_ of AI generated responses, but we want to get as many different samples from as many different models as possible.
                 if len(modellist)>0:
-                    llm=Llama(model_path=random.choice(modellist),verbose=False,)
+                    while llm==None:
+                        #just in case we run into incompatible llms...
+                        modelpath=random.choice(modellist)
+                        try:
+                            llm=Llama(model_path=modelpath,verbose=False,)
+                        except Exception as e:
+                            if "really a GGML file" in str(e):
+                                llm=None
+                                os.remove(modelpath)
+                        
                 mq="Generating AI Output..."
                 if args.quotes:
                     mq=Quote.print()
