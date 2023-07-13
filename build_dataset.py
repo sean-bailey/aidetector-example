@@ -65,11 +65,15 @@ def createCache():
 def getRandomBookText(cache):
     rawtext=""
     while len(rawtext)<1:
-        raw_book=gutenbergpy.textget.get_text_by_id(random.choice(cache.query(downloadtype=['application/plain','text/plain','text/html; charset=utf-8'], language=['en'])))
-        rawtext=raw_book.decode()
-        rawtext=raw_book.decode()
-        clean_book = gutenbergpy.textget.strip_headers(raw_book)
-        text=clean_book.decode()
+        try:
+            raw_book=gutenbergpy.textget.get_text_by_id(random.choice(cache.query(downloadtype=['application/plain','text/plain','text/html; charset=utf-8'], language=['en'])))
+            rawtext=raw_book.decode()
+            rawtext=raw_book.decode()
+            clean_book = gutenbergpy.textget.strip_headers(raw_book)
+            text=clean_book.decode()
+        except Exception as e:
+            if "exceptions must derive from" in str(e):
+                rawtext=""
     return rawtext,text
 
 def getSentences(text):
