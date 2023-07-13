@@ -24,7 +24,8 @@ Here's what each argument does:
 - `--filename`: The name of the file to write. This argument is required.
 - `--books`: The number of Gutenberg books to randomly sample from. The default is 10.
 - `--aigen`: If this flag is thrown, the script will generate AI output to store in the dataset. You must also specify a model using `--model`.
-- `--model`: Specify a model to use with `--aigen`. This argument is required when `--aigen` is used.
+- `--model`: Specify a model to use with `--aigen`. This argument is required when `--aigen` is used and cannot be used alongside `--modeldir`.
+- `--modeldir`: Specify a directory with models to use with `--aigen`. This argument is required when `--aigen` is used and cannot be used alongside `--model`.
 - `--quotes`: If this flag is thrown, the script will pull quotes from the internet to provide something to read while AI is generating output.
 - `--readbook`: If this flag is thrown, the script will select one of the books at random and provide its story, sentence by sentence, providing something to read while the AI is generating text. If both `--quotes` and `--readbook` are thrown, `--quotes` will be ignored.
 

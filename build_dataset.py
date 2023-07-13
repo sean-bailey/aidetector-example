@@ -14,6 +14,7 @@ nltk.download('punkt')
 from llama_cpp import Llama
 from tqdm import tqdm
 from quoters import Quote
+import os
 
 
 colors = ["\033[31m", "\033[32m", "\033[33m", "\033[34m", "\033[35m", "\033[36m", "\033[37m"]
@@ -92,7 +93,7 @@ def write_to_csv(data, filename):
     delimiter = find_delimiter(data)
     with open(filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile,delimiter=delimiter)
-        writer.writerow(["Classification", "Text"])  # write header
+        writer.writerow(["classification", "text"])  # write header
         for item in data:
             for key, value in item.items():
                 writer.writerow([key, value])  # write row
@@ -108,6 +109,10 @@ def generateFinalList(humansent,aisent):
     random.shuffle(returnlist)
     return returnlist
 
+def list_files(directory):
+    return [os.path.join(dirpath, file) for dirpath, dirnames, files in os.walk(directory) for file in files]
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate a dataset for aidetector')
     parser.add_argument('--filename', type=str, help='The name of the file to write', required=True)
@@ -116,7 +121,7 @@ def main():
     parser.add_argument('--books', type=int, default=10, help='The number of gutenberg books to randomly sample from (default 10)',required=False)
     parser.add_argument('--quotes', dest='quotes', action='store_true', help='Pull quotes from the internet to provide something to read while AI is generating output.',required=False)
     parser.add_argument('--readbook', dest='readbook', action='store_true', help='Select one of the books at random and provide its story, sentence by sentence, providing something to read while the AI is generating text.',required=False)
-
+    parser.add_argument('--modeldir',type=str,required=False,help="Specify the directory with compatible models if you are going to use multi-model generation")
 
     parser.set_defaults(aigen=False)
     parser.set_defaults(quotes=False)
@@ -125,11 +130,15 @@ def main():
 
     args = parser.parse_args()
 
-    if args.aigen and args.model is None:
-        parser.error("--model is required when --aigen is used")
+    if args.aigen and (args.model is None and args.modeldir is None):
+        parser.error("--model or --modeldir is required when --aigen is used")
+    if args.model and args.modeldir:
+        parser.error("You can only specify a single model or a directory filled with models to generate text from.")
     if args.readbook and args.quotes:
         args.quotes=False
-
+    modellist=[]
+    if args.modeldir:
+        modellist=list_files(args.modeldir)
     with Halo(text="Generating dataset...", spinner=random.choice(spinner_styles)) as spinner:
         #We need to get the groups
         finalsentgroup=[]
@@ -150,9 +159,13 @@ def main():
         aisentgroup=[]
         booklist.reverse()
         if args.aigen:
-            llm = Llama(model_path=args.model,verbose=False)
+            if args.model:
+                llm = Llama(model_path=args.model,verbose=False)
             pbar = tqdm(finalsentgroup, desc="Generating AI Output")
             for i, sent in enumerate(pbar):
+                #we want to generate the same _amount_ of AI generated responses, but we want to get as many different samples from as many different models as possible.
+                if len(modellist)>0:
+                    llm=Llama(model_path=random.choice(modellist),verbose=False,)
                 mq="Generating AI Output..."
                 if args.quotes:
                     mq=Quote.print()
