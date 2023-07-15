@@ -38,7 +38,21 @@ potential_delimiters = [
     '$', '@', '!', '?', '+', '-', 
     '=', '<', '>', '/', '\\', '`', 
     '[', ']', '{', '}', '(', ')', 
-    '.', '_', '§', '°', '£', '€'
+    '.', '_', '§', '°', '£', '€',
+        "\uFFF9",  # Interlinear Annotation Separator
+    "\uFFFA",  # Interlinear Annotation Anchor
+    "\uFFFB",  # Interlinear Annotation Terminator
+    "\uFFFC",  # Object Replacement Character
+    "\uFFFD",  # Replacement Character
+    "\uFEFF",  # Byte Order Mark
+    "\u2063",  # Invisible Separator
+    "\u2064",  # Invisible Plus
+    "\u206A",  # Inhibit Symmetric Swapping
+    "\u206B",  # Activate Symmetric Swapping
+    "\u206C",  # Inhibit Arabic Form Shaping
+    "\u206D",  # Activate Arabic Form Shaping
+    "\u206E",  # National Digit Shapes
+    "\u206F",   # Nominal Digit Shapes
 ]
 
 
@@ -87,14 +101,15 @@ def group_sentences(sentences, group_size=5):
         groups.append(group)
     return groups
 
-def generateAIOutput(inputtext,llm,tokens=128):
-    mysent=random.choice(inputtext)
-    print(mysent)
-    output = llm("Q: Determine the style of this passage and write a different passage in a similar style. Do not describe the style or the passage, provide your passage only: "+mysent+" A: ", max_tokens=tokens, stop=["Q:"], echo=False)
+def generateAIOutput(inputtext,llm,tokens=128,inputprompt=None):
+    if inputprompt is None:
+        inputprompt="Q: Determine the style of this passage and write a different passage in a similar style. Do not describe the style or the passage, provide your passage only: "+inputtext+" A: "
+    output = llm(inputprompt, max_tokens=tokens, stop=["Q:"], echo=False)
     return output['choices'][0]['text']
 
-def write_to_csv(data, filename):
-    delimiter = find_delimiter(data)
+def write_to_csv(data, filename, delimiter=None):
+    if delimiter is None:
+        delimiter = find_delimiter(data)
     with open(filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile,delimiter=delimiter)
         writer.writerow(["classification", "text"])  # write header
@@ -115,6 +130,7 @@ def generateFinalList(humansent,aisent):
 
 def list_files(directory):
     return [os.path.join(dirpath, file) for dirpath, dirnames, files in os.walk(directory) for file in files]
+
 
 
 def main():
