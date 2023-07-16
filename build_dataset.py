@@ -39,7 +39,7 @@ potential_delimiters = [
     '=', '<', '>', '/', '\\', '`', 
     '[', ']', '{', '}', '(', ')', 
     '.', '_', '§', '°', '£', '€',
-        "\uFFF9",  # Interlinear Annotation Separator
+    "\uFFF9",  # Interlinear Annotation Separator
     "\uFFFA",  # Interlinear Annotation Anchor
     "\uFFFB",  # Interlinear Annotation Terminator
     "\uFFFC",  # Object Replacement Character
@@ -112,7 +112,7 @@ def generateAIOutput(inputtext,llm,tokens=128,inputprompt=None):
         except Exception as e:
             if "tokens exceed" in str(e):
                 inputtext=random.choice(storedinputtext.split('.'))
-                inputtext=inputtext[:random.randint(len(inputtext))]
+                inputtext=inputtext[:random.randint(0,len(inputtext))+int(len(inputtext)/3)]
                 output = None
     return output['choices'][0]['text']
 
