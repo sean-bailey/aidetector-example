@@ -191,7 +191,7 @@ def main():
                     append_to_csv(current_csv, data, delimiter=DELIMITER)
                     append_to_csv(full_dataset, data, delimiter=DELIMITER)
                     current_counter += 1
-                    output_text = generate_ai_output(sent, llm, input_prompt="Q: This text was determined to be AI Generated: "+output_text+" Rewrite it to not be detectable as AI. A:")
+                    output_text = generate_ai_output(sent, llm, input_prompt="Q: Rewrite this to not look like AI generated: "+output_text+" A:")
             if current_counter >= args.traincounter:
                 spinner.text = "Looks like we have enough data now, fine-tuning..."
                 spinner.spinner = random.choice(SPINNER_STYLES)

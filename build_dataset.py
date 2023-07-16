@@ -183,15 +183,20 @@ def group_sentences(sentences, group_size=5):
 def generate_ai_output(inputtext, llm, tokens=128, inputprompt=None):
     output = None
     storedinputtext = inputtext
+    tokenshrink=1
     while output is None:
         try:
             if inputprompt is None:
-                inputprompt = "Q: Based on the style of this passage, generate a different passage in the same style: "+inputtext+" A: "
+                inputprompt = "Q: Generate a different passage based on this passage style: "+inputtext+" A: "
+            else:
+                baseinputprompt=inputprompt.split(storedinputtext)[0]
+                inputprompt=baseinputprompt+inputtext+" A: "
             output = llm(inputprompt, max_tokens=tokens, stop=["Q:"], echo=False)
         except Exception as e:
             if "tokens exceed" in str(e):
                 inputtext = random.choice(storedinputtext.split('.'))
-                inputtext = inputtext[:random.randint(0,len(inputtext))+int(len(inputtext)/3)]
+                inputtext = inputtext[:int(len(inputtext/tokenshrink))]
+                tokenshrink+=1
                 output = None
     return output['choices'][0]['text']
 
