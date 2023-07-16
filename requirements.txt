@@ -5,3 +5,7 @@ llama-cpp-python>=0.1.70
 tqdm==4.65.0
 quoters==0.30
 git+https://github.com/baileytec-labs/aidetector.git
+arxiv
+random-word
+requests
+textract

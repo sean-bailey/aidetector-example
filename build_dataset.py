@@ -1,27 +1,28 @@
-"""
-In here we just want to build the dataset for human input.
-
-"""
-
-from gutenbergpy.gutenbergcache import GutenbergCache
+import os
+import uuid
+import requests
+import textract
+from urllib.parse import urlparse
+import arxiv
 import random
+from datetime import datetime
+from random_word import RandomWords
+from gutenbergpy.gutenbergcache import GutenbergCache
 import gutenbergpy.textget
 import nltk
 import csv
 from halo import Halo
 import argparse
-nltk.download('punkt')
 from llama_cpp import Llama
 from tqdm import tqdm
 from quoters import Quote
-import os
 
+nltk.download('punkt')
 
-colors = ["\033[31m", "\033[32m", "\033[33m", "\033[34m", "\033[35m", "\033[36m", "\033[37m"]
+COLORS = ["\033[31m", "\033[32m", "\033[33m", "\033[34m", "\033[35m", "\033[36m", "\033[37m"]
 RESET = "\033[0m"
 
-
-spinner_styles = [
+SPINNER_STYLES = [
     'dots', 'dots2', 'dots3', 'dots4', 'dots5', 'dots6', 'dots7', 'dots8', 'dots9',
     'dots10', 'dots11', 'dots12', 'line', 'line2', 'pipe', 'simpleDots',
     'simpleDotsScrolling', 'star', 'star2', 'flip', 'hamburger', 'growVertical',
@@ -32,7 +33,14 @@ spinner_styles = [
     'toggle13'
 ]
 
-potential_delimiters = [
+SUPPORTED_EXTENSIONS = [
+    ".csv", ".doc", ".docx", ".eml", ".epub", ".gif", ".htm", ".html", ".jpeg", 
+    ".jpg", ".json", ".log", ".mp3", ".msg", ".odt", ".ogg", ".pdf", ".png", 
+    ".pptx", ".ps", ".psv", ".rtf", ".tab", ".tff", ".tif", ".tiff", ".tsv", 
+    ".txt", ".wav", ".xls", ".xlsx"
+]
+
+POTENTIAL_DELIMITERS = [
     ',', ';', '|', '\t', ':', ' ', 
     '#', '~', '^', '&', '*', '%', 
     '$', '@', '!', '?', '+', '-', 
@@ -55,64 +63,135 @@ potential_delimiters = [
     "\u206F",   # Nominal Digit Shapes
 ]
 
+def get_random_word(min_word_length):
+    r = RandomWords()
+    word_length = 0
+    while word_length < min_word_length:
+        word = r.get_random_word()
+        if word:
+            word_length = len(word)
+    return word
+
+# Search for papers on arXiv before a given date
+def get_arxiv_article(beforedate="2018-01-01", searchterm=None):
+    newlist = []
+    randomsearch = False
+    while len(newlist) < 1:
+        if searchterm is None or randomsearch:
+            randomsearch = True
+            searchterm = get_random_word(random.randint(6, 12))
+
+        dateobj = datetime.strptime(beforedate, "%Y-%m-%d")
+        search = arxiv.Search(
+            query=searchterm,
+            max_results=100,
+            sort_by=arxiv.SortCriterion.Relevance,
+        )
+
+        # Get all results
+        results = list(search.get())
+        newlist = [result for result in results if result.updated.replace(tzinfo=None) < dateobj.replace(tzinfo=None)]
+        if len(newlist) < 1:
+            randomsearch = True
+
+    return random.choice(newlist)
+
+def decode_if_bytes(data):
+    return data.decode() if isinstance(data, bytes) else data
+
+def get_file_extension(path):
+    return path.split("/")[-1].split('.')
+
+def download_file(url, extension):
+    response = requests.get(url)
+    if response.status_code != 200:
+        print(f"Failed to fetch webpage: {url}")
+        return None
+
+    filename = f"{uuid.uuid4()}.{extension}"
+    with open(filename, 'wb') as file:
+        file.write(response.content)
+    
+    return filename
+
+def extract_text_from_file(filename):
+    if not os.path.exists(filename):
+        print(f"File does not exist: {filename}")
+        return None
+
+    text = textract.process(filename)
+    os.remove(filename)
+    return decode_if_bytes(text)
+
+def get_text_from_document(path):
+    parsed_path = urlparse(path)
+    extension = get_file_extension(path)
+
+    if extension not in SUPPORTED_EXTENSIONS:
+        extension = "html"
+
+    if parsed_path.netloc:
+        # The path is a URL
+        filename = download_file(path, extension)
+    else:
+        # The path is a local file
+        filename = path
+
+    return extract_text_from_file(filename) if filename else None
 
 def find_delimiter(data):
-    
     # Convert data to a single string
     data_str = str(data)
 
     # Find a character that's not in the data
-    for delimiter in potential_delimiters:
+    for delimiter in POTENTIAL_DELIMITERS:
         if delimiter not in data_str:
             return delimiter
 
     # If all potential delimiters are in the data, raise an error
     raise ValueError("Couldn't find a suitable delimiter")
 
-
-
-def createCache():
+def create_cache():
     GutenbergCache.create(refresh=True, download=True, unpack=True, parse=True, cache=True, deleteTemp=True)
     cache  = GutenbergCache.get_cache()
     return cache
 
-def getRandomBookText(cache):
-    rawtext=""
-    while len(rawtext)<1:
+def get_random_arxiv_text(beforedate="2018-01-01"):
+    myarticle = get_arxiv_article(beforedate)
+    articletext = get_text_from_document(myarticle.download_pdf())
+    return articletext
+
+def get_random_book_text(cache):
+    rawtext = ""
+    while len(rawtext) < 1:
         try:
-            raw_book=gutenbergpy.textget.get_text_by_id(random.choice(cache.query(downloadtype=['application/plain','text/plain','text/html; charset=utf-8'], language=['en'])))
-            rawtext=raw_book.decode()
-            rawtext=raw_book.decode()
+            raw_book = gutenbergpy.textget.get_text_by_id(random.choice(cache.query(downloadtype=['application/plain','text/plain','text/html; charset=utf-8'], language=['en'])))
+            rawtext = raw_book.decode()
             clean_book = gutenbergpy.textget.strip_headers(raw_book)
-            text=clean_book.decode()
+            text = clean_book.decode()
         except Exception as e:
             if "exceptions must derive from" in str(e):
-                rawtext=""
-    return rawtext,text
+                rawtext = ""
+    return rawtext, text
 
-def getSentences(text):
-    sentences = nltk.sent_tokenize(text)
-    return sentences
+def get_sentences(text):
+    return nltk.sent_tokenize(text)
 
 def group_sentences(sentences, group_size=5):
-    groups = []
-    for i in range(0, len(sentences), group_size):
-        group = " ".join(sentences[i:i+group_size])
-        groups.append(group)
-    return groups
+    return [" ".join(sentences[i:i+group_size]) for i in range(0, len(sentences), group_size)]
 
-def generateAIOutput(inputtext,llm,tokens=128,inputprompt=None):
-    output=None
-    storedinputtext=inputtext
-    while output==None:
+def generate_ai_output(inputtext, llm, tokens=128, inputprompt=None):
+    output = None
+    storedinputtext = inputtext
+    while output is None:
         try:
             if inputprompt is None:
-                inputprompt="Q: Based on the style of this passage, generate a different passage in the same style: "+inputtext+" A: "
+                inputprompt = "Q: Based on the style of this passage, generate a different passage in the same style: "+inputtext+" A: "
             output = llm(inputprompt, max_tokens=tokens, stop=["Q:"], echo=False)
         except Exception as e:
             if "tokens exceed" in str(e):
-                inputtext=random.choice(storedinputtext.split('.'))
-                inputtext=inputtext[:random.randint(0,len(inputtext))+int(len(inputtext)/3)]
+                inputtext = random.choice(storedinputtext.split('.'))
+                inputtext = inputtext[:random.randint(0,len(inputtext))+int(len(inputtext)/3)]
                 output = None
     return output['choices'][0]['text']
 
@@ -125,21 +204,20 @@ def write_to_csv(data, filename, delimiter=None):
         for item in data:
             for key, value in item.items():
                 writer.writerow([key, value])  # write row
-#make sure the dataset puts 1 next to AI Generated text, and 0 next to human generated text.
-def generateFinalList(humansent,aisent):
-    returnlist=[]
-    for item in humansent:
-        if len(item)>1:
-            returnlist.append({0:item})
-    for thing in aisent:
-        if len(thing)>1:
-            returnlist.append({1:thing})
+
+def generate_final_list(human_sent, ai_sent):
+    returnlist = []
+    for item in human_sent:
+        if len(item) > 1:
+            returnlist.append({0: item})
+    for thing in ai_sent:
+        if len(thing) > 1:
+            returnlist.append({1: thing})
     random.shuffle(returnlist)
     return returnlist
 
 def list_files(directory):
     return [os.path.join(dirpath, file) for dirpath, dirnames, files in os.walk(directory) for file in files]
-
 
 
 def main():
@@ -151,11 +229,8 @@ def main():
     parser.add_argument('--quotes', dest='quotes', action='store_true', help='Pull quotes from the internet to provide something to read while AI is generating output.',required=False)
     parser.add_argument('--readbook', dest='readbook', action='store_true', help='Select one of the books at random and provide its story, sentence by sentence, providing something to read while the AI is generating text.',required=False)
     parser.add_argument('--modeldir',type=str,required=False,help="Specify the directory with compatible models if you are going to use multi-model generation")
-
-    parser.set_defaults(aigen=False)
-    parser.set_defaults(quotes=False)
-    parser.set_defaults(readbook=False)
-
+    parser.add_argument('--nogutenberg',dest='nogutenberg',action='store_true',help='Specify this flag to prevent getting Project Gutenberg texts for human sources',required=False)
+    parser.add_argument('--noarxiv',dest='noarxiv',action='store_true',help='Specify this flag to prevent getting arxiv texts for human sources',required=False)
 
     args = parser.parse_args()
 
@@ -165,62 +240,67 @@ def main():
         parser.error("You can only specify a single model or a directory filled with models to generate text from.")
     if args.readbook and args.quotes:
         args.quotes=False
-    modellist=[]
-    if args.modeldir:
-        modellist=list_files(args.modeldir)
-    with Halo(text="Generating dataset...", spinner=random.choice(spinner_styles)) as spinner:
-        #We need to get the groups
-        finalsentgroup=[]
-        booklist=[]
-        cache=createCache()
-        for i in range(args.books):
-            spinner.text="Processing book "+str(i)
-            spinner.spinner=random.choice(spinner_styles)
-            rawtext,text=getRandomBookText(cache)
-            currentsentences=getSentences(text)
-            if args.readbook:
-                for sent in currentsentences:
-                    booklist.append(sent)
-            sentgroup=group_sentences(currentsentences)
-            for group in sentgroup:
-                finalsentgroup.append(group)
-        #now, we need to create AI output based on this final sentence group.
-        aisentgroup=[]
+
+    modellist = list_files(args.modeldir) if args.modeldir else []
+    booklist = []
+    finalsentgroup = []
+    aisentgroup = []
+
+    with Halo(text="Generating dataset...", spinner=random.choice(SPINNER_STYLES)) as spinner:
+        if not args.nogutenberg:
+            cache = create_cache()
+            for i in range(args.books):
+                spinner.text = f"Processing book {i}"
+                spinner.spinner = random.choice(SPINNER_STYLES)
+                rawtext, text = get_random_book_text(cache)
+                currentsentences = get_sentences(text)
+                if args.readbook:
+                    booklist.extend(currentsentences)
+                finalsentgroup.extend(group_sentences(currentsentences))
+
+        if not args.noarxiv:
+            for i in range(args.books):
+                spinner.text = f"Processing article {i}"
+                spinner.spinner = random.choice(SPINNER_STYLES)
+                text = get_random_arxiv_text()
+                currentsentences = get_sentences(text)
+                if args.readbook:
+                    booklist.extend(currentsentences)
+                finalsentgroup.extend(group_sentences(currentsentences))
+
         booklist.reverse()
+
         if args.aigen:
-            llm=None
-            if args.model:
-                llm = Llama(model_path=args.model,verbose=False)
+            llm = Llama(model_path=args.model, verbose=False) if args.model else None
             pbar = tqdm(finalsentgroup, desc="Generating AI Output")
             for i, sent in enumerate(pbar):
-                #we want to generate the same _amount_ of AI generated responses, but we want to get as many different samples from as many different models as possible.
-                if len(modellist)>0:
-                    while llm==None:
-                        #just in case we run into incompatible llms...
-                        modelpath=random.choice(modellist)
+                if len(modellist) > 0:
+                    while llm is None:
+                        modelpath = random.choice(modellist)
                         try:
-                            llm=Llama(model_path=modelpath,verbose=False,)
+                            llm = Llama(model_path=modelpath, verbose=False)
                         except Exception as e:
                             if "really a GGML file" in str(e):
-                                llm=None
+                                llm = None
                                 os.remove(modelpath)
-                        
-                mq="Generating AI Output..."
-                if args.quotes:
-                    mq=Quote.print()
-                elif args.readbook:
-                    mq=booklist.pop()
-                
-                color = colors[i % len(colors)]
-                pbar.set_description(f"{color}{mq}{RESET}")
-                spinner.text="Generating AI portion of dataset... "
-                spinner.spinner = random.choice(spinner_styles)
-                aisentgroup.append(generateAIOutput(sent,llm))
-        spinner.text="Generating final list..."
-        spinner.spinner=random.choice(spinner_styles)
-        finallist=generateFinalList(finalsentgroup,aisentgroup) 
-        write_to_csv(finallist, args.filename)
 
+                mq = "Generating AI Output..."
+                if args.quotes:
+                    mq = Quote.print()
+                elif args.readbook:
+                    mq = booklist.pop()
+
+                color = COLORS[i % len(COLORS)]
+                pbar.set_description(f"{color}{mq}{RESET}")
+                spinner.text = "Generating AI portion of dataset... "
+                spinner.spinner = random.choice(SPINNER_STYLES)
+                aisentgroup.append(generate_ai_output(sent, llm))
+
+        spinner.text = "Generating final list..."
+        spinner.spinner = random.choice(SPINNER_STYLES)
+        finallist = generate_final_list(finalsentgroup, aisentgroup) 
+        write_to_csv(finallist, args.filename)
 
 if __name__ == "__main__":
     main()
+

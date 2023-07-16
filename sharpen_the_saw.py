@@ -27,30 +27,20 @@ from aidetector.inference import *
 from aidetector.aidetectorclass import *
 from aidetector.training import *
 import uuid
-import time
 import os
 import glob
 import shutil
 import subprocess
+import pandas as pd
+import torch
+from halo import Halo
+from llama_cpp import Llama
+import random
+import csv
 
+DELIMITER = "\u2064"
+EVAL_THRESHOLD = 0.98
 
-DELIMITER="\u2064"
-evalthreshold=0.98
-
-
-#We're going to need this thing to have a bit of organization. It needs to intelligently auto-run effectively forever. 
-#This means it will have an "old" and "current" folder structure.
-
-#To start this, we'll have to specify a "current" directory, and optionally an "old" directory. If old is not specified, it will be made.
-#This thing will pull the current aidetector model and vocab from the current directory. Once it needs re-training, the current model gets dumped into the old directory
-#with some form of labeling system, with the new model being put in the current directory. It gets reloaded every time from the current directory. 
-#We can probably pull off using the current/old locations for our datasets too, though we'll be mostly just using old.
-#keep default 5 old models, but allow user to specify how many models to keep. I'm completely unconcerned about the size of the text. Gutenberg maxes out at what, 300GB?
-#We'll expand from there. PoC.
-
-
-
-#I'm going to enforce some norms here. I want the aidetector model file to end in .aidetectormodel, and the vocab to end in .vocab. I'll tell the user this if not detected.
 def return_specific_files(directory, extension):
     return [os.path.join(dirpath, file) for dirpath, dirnames, files in os.walk(directory) 
             for file in files if os.path.splitext(file)[1] == extension]
@@ -58,131 +48,80 @@ def return_specific_files(directory, extension):
 def move_file(source_filepath, destination_directory):
     shutil.move(source_filepath, destination_directory)
 
-def testPhrase(inputtext,modelfile,vocabfile):
+def test_phrase(input_text, model_file, vocab_file):
     try:
         tokenizer=get_tokenizer()
     except Exception as e:
         if "Can't find model" in str(e):
             tokenizer=get_tokenizer(download=True)
-    vocab=load_vocab(vocabfile)
-    model=AiDetector(len(vocab))
-    model.load_state_dict(torch.load(modelfile))
-    isai,aiprobability=check_input(
-        model,
-        vocab,
-        inputtext,
-        tokenizer=tokenizer,
-    )
-    return isai
-
+    vocab = load_vocab(vocab_file)
+    model = AiDetector(len(vocab))
+    model.load_state_dict(torch.load(model_file))
+    is_ai = check_input(model, vocab, input_text, tokenizer=tokenizer)
+    return is_ai
 
 def append_to_csv(filename, data, delimiter):
-    # Check if the file exists
     file_exists = os.path.isfile(filename)
-
     with open(filename, 'a', newline='') as csvfile:
         writer = csv.writer(csvfile, delimiter=delimiter)
-        
-        # If the file does not exist, write the header
         if not file_exists:
-            writer.writerow(["Classification", "Text"])
-        
-        # Append the data
+            writer.writerow(["classification", "text"])
         writer.writerow(data)
 
+def random_boolean():
+    return random.choice([True, False])
 
-def finetuneModel(inputmodel,inputdataset,outputmodelfile,outputvocabfile,percentsplit=0.2,classificationlabel="classification",textlabel="text",epochs=100,lowerbound=0.3, upperbound=0.5):
+def fine_tune_model(input_model, input_dataset, output_model_file, output_vocab_file, percent_split=0.2, classification_label="classification", text_label="text", epochs=100, lower_bound=0.3, upper_bound=0.5):
     try:
         tokenizer=get_tokenizer()
     except Exception as e:
         if "Can't find model" in str(e):
             tokenizer=get_tokenizer(download=True)
-    traintxt, test_text, train_labels, test_labels = load_data(inputdataset,percentsplit=percentsplit,classificationlabel=classificationlabel,textlabel=textlabel)
-    vocab, trainseqs, testseqs = tokenize_data(
-        traintxt,
-        test_text,
-        tokenizer
-        
-    )
+    train_txt, test_text, train_labels, test_labels = load_data(input_dataset, percent_split=percent_split, classification_label=classification_label, text_label=text_label)
+    vocab, train_seqs, test_seqs = tokenize_data(train_txt, test_text, tokenizer)
     model = AiDetector(len(vocab))
-    
-    model.load_state_dict(torch.load(inputmodel))
-    # Pass a sample input through the model to compute the size of the convolutional layer output
-    _ = model(torch.zeros(1, trainseqs.size(1)).long())
+    model.load_state_dict(torch.load(input_model))
+    _ = model(torch.zeros(1, train_seqs.size(1)).long())
     model.add_fc_layer()
-    spinner = Halo(text='finetuning model', spinner='dots')
+    spinner = Halo(text='Fine-tuning model', spinner='dots')
     spinner.start()
-
-    train_model(model,
-                trainseqs,
-                torch.tensor(train_labels.values, dtype=torch.float),
-                testseqs,
-                torch.tensor(test_labels.values, dtype=torch.float),
-                epochs=epochs,
-                lowerbound=lowerbound,
-                upperbound=upperbound
-    )
+    train_model(model, train_seqs, torch.tensor(train_labels.values, dtype=torch.float), test_seqs, torch.tensor(test_labels.values, dtype=torch.float), epochs=epochs, lower_bound=lower_bound, upper_bound=upper_bound)
     spinner.stop()
-
-    #print("training complete. Saving...")
-    
-    save_model(
-        model, outputmodelfile
-    )
-
-    # Save the vocabulary
-    save_vocab(vocab=vocab, vocaboutputfile=outputvocabfile)
-
+    save_model(model, output_model_file)
+    save_vocab(vocab=vocab, vocab_output_file=output_vocab_file)
 
 def list_files_by_age(directory, extension):
-    # Get a list of all files with the given extension
     files = glob.glob(f"{directory}/*.{extension}")
-    
-    # Sort the files by their last modified time (oldest first)
     files.sort(key=os.path.getmtime)
-    
     return files
 
-
-def evalModel(testfile,vocabfile,modelfile):
+def eval_model(test_file, vocab_file, model_file):
     try:
         tokenizer=get_tokenizer()
     except Exception as e:
         if "Can't find model" in str(e):
             tokenizer=get_tokenizer(download=True)
-    vocab=load_vocab(vocabfile)
+    vocab = load_vocab(vocab_file)
     model = AiDetector(len(vocab))
-    df = pd.read_csv(
-        testfile,
-        sep=detect_delimiter(testfile,"classification","text")
-    )
-    accuracysum=0
-    accuracycount=0
-    for index,row in df.iterrows():
-        classification=row['classification']
-        text=str(row['text'])
-        if len(text)>0:
+    df = pd.read_csv(test_file, sep=detect_delimiter(test_file, "classification", "text"))
+    accuracy_sum = 0
+    accuracy_count = 0
+    for index, row in df.iterrows():
+        classification = row['classification']
+        text = str(row['text'])
+        if len(text) > 0:
             try:
-                model.load_state_dict(torch.load(modelfile))
-                isai,aiprobability=check_input(
-                    model,
-                    vocab,
-                    text,
-                    tokenizer=tokenizer,
-                )
-                if isai == classification:
-                    accuracysum +=1
-                accuracycount+=1
+                model.load_state_dict(torch.load(model_file))
+                is_ai = check_input(model, vocab, text, tokenizer=tokenizer)
+                if is_ai == classification:
+                    accuracy_sum += 1
+                accuracy_count += 1
             except Exception as e:
                 print(text)
                 print(e)
-    evaluationpercent=accuracysum/accuracycount
-    return evaluationpercent
+    evaluation_percent = accuracy_sum / accuracy_count
+    return evaluation_percent
 
-
-#instead of reinventing the wheel I'm just going to have a current and fullcsv. It's not really any overhead.
-
-#We need to evaluate the model, and only keep it if it's performing better.
 def main():
     parser = argparse.ArgumentParser(description='Continuously generate a dataset and model for aidetector')
     parser.add_argument('--currentdir', type=str, help='The directory for the current model/vocab', required=True)
@@ -193,118 +132,105 @@ def main():
     parser.add_argument("--archivecount",type=int,required=False,default=5,help="The number of older models and vocab files to keep")
     parser.add_argument("--evaldataset",type=str,required=False,default=None,help="The premade evaluation dataset")
     args = parser.parse_args()
-    currentmodel=return_specific_files(args.currentdir,".aidetectormodel")[0]
-    currentvocab=return_specific_files(args.currentdir,".vocab")[0]
+    current_model = return_specific_files(args.currentdir, ".aidetectormodel")[0]
+    current_vocab = return_specific_files(args.currentdir, ".vocab")[0]
     try:
-        currentcsv=return_specific_files(args.currentdir,".csv")[0]
+        current_csv = return_specific_files(args.currentdir, ".csv")[0]
     except:
-        currentcsv=os.path.join(args.currentdir,str(uuid.uuid4()).replace("-","")+".csv")
-
-    bookcache=createCache()
-    # Get the current working directory
+        current_csv = os.path.join(args.currentdir, str(uuid.uuid4()).replace("-", "") + ".csv")
+    book_cache = create_cache()
     current_directory = os.getcwd()
-
-    # Create a new directory path
-    olddir = os.path.join(current_directory, args.olddir)
-    fullldataset=os.path.join(olddir,args.fulldataset)
-    evaldataset=None
+    old_dir = os.path.join(current_directory, args.olddir)
+    full_dataset = os.path.join(old_dir, args.fulldataset)
+    eval_dataset = None
     if args.evaldataset is None:
-        evaldataset=os.path.join(args.currentdir,str(uuid.uuid4()).replace("-","")+".csv")
-        #we need to create it
-        cmd=['python3','build_dataset.py',"--filename",evaldataset,"--aigen","--modeldir",args.modeldir]
+        eval_dataset = os.path.join(args.currentdir, str(uuid.uuid4()).replace("-", "") + ".csv")
+        cmd = ['python3', 'build_dataset.py', "--filename", eval_dataset, "--aigen", "--modeldir", args.modeldir]
         subprocess.run(cmd)
     else:
-        evaldataset=args.evaldataset
-    #We're going to need to evaluate the model first...
-    currentevalpercent=evalModel(evaldataset,vocabfile=currentvocab,modelfile=currentmodel)
-    
-    # Create the new directory
-    os.makedirs(olddir, exist_ok=True)
-    currentcounter=0
-    with Halo(text="Generating dataset...", spinner=random.choice(spinner_styles)) as spinner:
+        eval_dataset = args.evaldataset
+    current_eval_percent = eval_model(eval_dataset, vocab_file=current_vocab, model_file=current_model)
+    os.makedirs(old_dir, exist_ok=True)
+    current_counter = 0
+    with Halo(text="Generating dataset...", spinner=random.choice(SPINNER_STYLES)) as spinner:
         while True:
-            rawtext,text=getRandomBookText(bookcache)
-            sentences=getSentences(text)
-            sentgroups=group_sentences(sentences)
-            for sent in sentgroups:
-                spinner.text="Iterating through the phrases in the book..."
-                spinner.spinner=random.choice(spinner_styles)
-                isai=testPhrase(sent,currentmodel,currentvocab)
-                if isai==1:
-                    spinner.text="Got a human made phrase the model thought was AI!"
-                    spinner.spinner=random.choice(spinner_styles)
-                    data=[0,sent]
-                    append_to_csv(currentcsv,data,delimiter=DELIMITER)
-                    append_to_csv(fullldataset,data,delimiter=DELIMITER)
-                    currentcounter+=1
-                currentllmlist=list_files(args.modeldir)
-                llm=None
-                while llm==None:
-                    spinner.text="Selecting an LLM to generate the text with..."
-                    spinner.spinner=random.choice(spinner_styles)
-                    #just in case we run into incompatible llms...
-                    modelpath=random.choice(currentllmlist)
+            if random_boolean():
+                raw_text, text = get_random_book_text(book_cache)
+            else:
+                text=get_random_arxiv_text()
+            sentences = get_sentences(text)
+            sent_groups = group_sentences(sentences)
+            for sent in sent_groups:
+                spinner.text = "Iterating through the human phrases..."
+                spinner.spinner = random.choice(SPINNER_STYLES)
+                is_ai = test_phrase(sent, current_model, current_vocab)
+                if is_ai == 1:
+                    spinner.text = "Got a human made phrase the model thought was AI!"
+                    spinner.spinner = random.choice(SPINNER_STYLES)
+                    data = [0, sent]
+                    append_to_csv(current_csv, data, delimiter=DELIMITER)
+                    append_to_csv(full_dataset, data, delimiter=DELIMITER)
+                    current_counter += 1
+                current_llm_list = list_files(args.modeldir)
+                llm = None
+                while llm is None:
+                    spinner.text = "Selecting an LLM to generate the text with..."
+                    spinner.spinner = random.choice(SPINNER_STYLES)
+                    model_path = random.choice(current_llm_list)
                     try:
-                        llm=Llama(model_path=modelpath,verbose=False,)
+                        llm = Llama(model_path=model_path, verbose=False)
                     except Exception as e:
                         if "really a GGML file" in str(e):
-                            llm=None
-                            os.remove(modelpath)
-                outputtext=generateAIOutput(sent,llm)
-                while testPhrase(outputtext,currentmodel,currentvocab) == 0:
-                    spinner.text="Fooled the classifier model! Generated an AI output which looks 'human' enough..."
-                    spinner.spinner=random.choice(spinner_styles)
-                    data=[1,outputtext]
-                    append_to_csv(currentcsv,data,delimiter=DELIMITER)
-                    append_to_csv(fullldataset,data,delimiter=DELIMITER)
-                    currentcounter+=1
-                    outputtext=generateAIOutput(sent,llm,inputprompt="Q: This text was determined to be AI Generated: "+outputtext+" Rewrite it to not be detectable as AI. A:")
-            if currentcounter>=args.traincounter:
-                spinner.text="Looks like we have enough data now, finetuning..."
-                spinner.spinner=random.choice(spinner_styles)
-                #now we need to finetune the new model...
-                newname=str(uuid.uuid4()).replace("-","")
-                newmodel=os.path.join(args.currentdir,newname+".aidetectormodel")
-                newvocab=os.path.join(args.currentdir,newname+".vocab")
-                finetuneModel(inputmodel=currentmodel,inputdataset=currentcsv,outputmodelfile=newmodel,outputvocabfile=newvocab)
-                #now we only want to keep this thing if it's performing better than the current model, naturally
-                newevalpercent=evalModel(evaldataset,vocabfile=newvocab,modelfile=newmodel)
-                if newevalpercent >= currentevalpercent:
-                    spinner.text="The new classifier performed better!"
-                    spinner.spinner=random.choice(spinner_styles)
-                    currentevalpercent=newevalpercent
-                    #do we want to generate a new dataset to evaluate against? If it was randomly generated, is it truly going to matter? How will we really track progression?
-                    #how about a threshold of "its too good against this dataset"
-                    
-                    move_file(currentmodel,olddir)
-                    move_file(currentvocab,olddir) #logically their names should be the same, might not be perfect but whatever it's an archive.
-                    oldmodellist=list_files_by_age(olddir,".aidetectormodel")
-                    oldvocablist=list_files_by_age(olddir,".vocab")
-                    oldmodellist.reverse()
-                    oldvocablist.reverse()
-                    while len(oldmodellist) > args.archivecount:
-                        os.remove(oldmodellist.pop())
-                    while len(oldvocablist) > args.archivecount:
-                        os.remove(oldvocablist.pop)
-                    os.remove(currentcsv)
-                    currentcsv=os.path.join(args.currentdir,str(uuid.uuid4()).replace("-","")+".csv")
-                    currentmodel=newmodel
-                    currentvocab=newvocab
-                    while currentevalpercent > evalthreshold: #if our new model is beating the dataset by 98%? 
-                        spinner.text="Our model is performing higher than our threshold. Lets see if we can generate better data to stump it..."
-                        spinner.spinner=random.choice(spinner_styles)
-                        cmd=['python3','build_dataset.py',"--filename",evaldataset,"--aigen","--modeldir",args.modeldir]
+                            llm = None
+                            os.remove(model_path)
+                output_text = generate_ai_output(sent, llm)
+                while test_phrase(output_text, current_model, current_vocab) == 0:
+                    spinner.text = "Fooled the classifier model! Generated an AI output which looks 'human' enough..."
+                    spinner.spinner = random.choice(SPINNER_STYLES)
+                    data = [1, output_text]
+                    append_to_csv(current_csv, data, delimiter=DELIMITER)
+                    append_to_csv(full_dataset, data, delimiter=DELIMITER)
+                    current_counter += 1
+                    output_text = generate_ai_output(sent, llm, input_prompt="Q: This text was determined to be AI Generated: "+output_text+" Rewrite it to not be detectable as AI. A:")
+            if current_counter >= args.traincounter:
+                spinner.text = "Looks like we have enough data now, fine-tuning..."
+                spinner.spinner = random.choice(SPINNER_STYLES)
+                new_name = str(uuid.uuid4()).replace("-", "")
+                new_model = os.path.join(args.currentdir, new_name + ".aidetectormodel")
+                new_vocab = os.path.join(args.currentdir, new_name + ".vocab")
+                fine_tune_model(input_model=current_model, input_dataset=current_csv, output_model_file=new_model, output_vocab_file=new_vocab)
+                new_eval_percent = eval_model(eval_dataset, vocab_file=new_vocab, model_file=new_model)
+                if new_eval_percent >= current_eval_percent:
+                    spinner.text = "The new classifier performed better!"
+                    spinner.spinner = random.choice(SPINNER_STYLES)
+                    current_eval_percent = new_eval_percent
+                    move_file(current_model, old_dir)
+                    move_file(current_vocab, old_dir)
+                    old_model_list = list_files_by_age(old_dir, ".aidetectormodel")
+                    old_vocab_list = list_files_by_age(old_dir, ".vocab")
+                    old_model_list.reverse()
+                    old_vocab_list.reverse()
+                    while len(old_model_list) > args.archivecount:
+                        os.remove(old_model_list.pop())
+                    while len(old_vocab_list) > args.archivecount:
+                        os.remove(old_vocab_list.pop())
+                    os.remove(current_csv)
+                    current_csv = os.path.join(args.currentdir, str(uuid.uuid4()).replace("-", "") + ".csv")
+                    current_model = new_model
+                    current_vocab = new_vocab
+                    while current_eval_percent > EVAL_THRESHOLD:
+                        spinner.text = "Our model is performing higher than our threshold. Lets see if we can generate better data to stump it..."
+                        spinner.spinner = random.choice(SPINNER_STYLES)
+                        cmd = ['python3', 'build_dataset.py', "--filename", eval_dataset, "--aigen", "--modeldir", args.modeldir]
                         subprocess.run(cmd)
-                        currentevalpercent=evalModel(evaldataset,vocabfile=currentvocab,modelfile=currentmodel)
+                        current_eval_percent = eval_model(eval_dataset, vocab_file=current_vocab, model_file=current_model)
                 else:
-                    spinner.text="This new model doesn't perform better than our current model. Let's trash it and try again."
-                    spinner.spinner=random.choice(spinner_styles)
-                    os.remove(newmodel)
-                    os.remove(newvocab)
-                currentcounter=0 #give it more data and train, either on a existing dataset or a brand new one.
-        
-
-
+                    spinner.text = "This new model doesn't perform better than our current model. Let's trash it and try again."
+                    spinner.spinner = random.choice(SPINNER_STYLES)
+                    os.remove(new_model)
+                    os.remove(new_vocab)
+                current_counter = 0
 
 if __name__ == "__main__":
     main()
+
