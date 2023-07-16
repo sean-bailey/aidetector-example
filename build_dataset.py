@@ -107,11 +107,12 @@ def generateAIOutput(inputtext,llm,tokens=128,inputprompt=None):
     while output==None:
         try:
             if inputprompt is None:
-                inputprompt="Q: Determine the style of this passage and write a different passage in a similar style. Do not describe the style or the passage, provide your passage only: "+inputtext+" A: "
+                inputprompt="Q: Based on the style of this passage, generate a different passage in the same style: "+inputtext+" A: "
             output = llm(inputprompt, max_tokens=tokens, stop=["Q:"], echo=False)
         except Exception as e:
             if "tokens exceed" in str(e):
                 inputtext=random.choice(storedinputtext.split('.'))
+                inputtext=inputtext[:random.randint(len(inputtext))]
                 output = None
     return output['choices'][0]['text']
 
