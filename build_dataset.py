@@ -89,7 +89,7 @@ def get_arxiv_article(beforedate="2018-01-01", searchterm=None):
         )
 
         # Get all results
-        results = list(search.get())
+        results = list(search.results())
         newlist = [result for result in results if result.updated.replace(tzinfo=None) < dateobj.replace(tzinfo=None)]
         if len(newlist) < 1:
             randomsearch = True
