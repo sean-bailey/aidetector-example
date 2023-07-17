@@ -183,7 +183,8 @@ def group_sentences(sentences, group_size=5):
 def generate_ai_output(inputtext, llm, tokens=128, inputprompt=None):
     output = None
     storedinputtext = inputtext
-    tokenshrink=1
+    max_tokens_limit = 4096  
+
     while output is None:
         try:
             if inputprompt is None:
@@ -191,15 +192,22 @@ def generate_ai_output(inputtext, llm, tokens=128, inputprompt=None):
             else:
                 baseinputprompt=inputprompt.split(storedinputtext)[0]
                 inputprompt=baseinputprompt+inputtext+" A: "
+
+            # Check if the total number of tokens exceeds the model's maximum token limit
+            total_tokens = len(llm.tokenizer.encode(inputprompt)) + tokens
+            if total_tokens > max_tokens_limit:
+
+                inputtext = llm.tokenizer.decode(llm.tokenizer.encode(inputtext)[:max_tokens_limit-tokens])
+      
+
             output = llm(inputprompt, max_tokens=tokens, stop=["Q:"], echo=False)
         except Exception as e:
             if "tokens exceed" in str(e):
-                inputtext = random.choice(storedinputtext.split('.'))
-                upperbound=max(1,int(len(inputtext)/tokenshrink))
-                inputtext = inputtext[:upperbound]
-                tokenshrink+=1
-                output = None
+                max_tokens_limit=int(max_tokens_limit/2)
+                if max_tokens_limit <=tokens:
+                    tokens=int(tokens/2)
     return output['choices'][0]['text']
+
 
 def write_to_csv(data, filename, delimiter=None):
     if delimiter is None:
@@ -225,6 +233,16 @@ def generate_final_list(human_sent, ai_sent):
 def list_files(directory):
     return [os.path.join(dirpath, file) for dirpath, dirnames, files in os.walk(directory) for file in files]
 
+def select_model(modellist):
+    llm=None
+    while llm is None:
+        modelpath = random.choice(modellist)
+        try:
+            llm = Llama(model_path=modelpath, verbose=False)
+        except Exception as e:
+            if "really a GGML file" in str(e):
+                llm = None
+                os.remove(modelpath)
 
 def main():
     parser = argparse.ArgumentParser(description='Generate a dataset for aidetector')
@@ -281,14 +299,7 @@ def main():
             pbar = tqdm(finalsentgroup, desc="Generating AI Output")
             for i, sent in enumerate(pbar):
                 if len(modellist) > 0:
-                    while llm is None:
-                        modelpath = random.choice(modellist)
-                        try:
-                            llm = Llama(model_path=modelpath, verbose=False)
-                        except Exception as e:
-                            if "really a GGML file" in str(e):
-                                llm = None
-                                os.remove(modelpath)
+                   llm=select_model(modellist)
 
                 mq = "Generating AI Output..."
                 if args.quotes:
@@ -300,7 +311,7 @@ def main():
                 pbar.set_description(f"{color}{mq}{RESET}")
                 spinner.text = "Generating AI portion of dataset... "
                 spinner.spinner = random.choice(SPINNER_STYLES)
-                aisentgroup.append(generate_ai_output(sent, llm))
+                aisentgroup.append(generate_ai_output(sent,llm))
 
         spinner.text = "Generating final list..."
         spinner.spinner = random.choice(SPINNER_STYLES)
