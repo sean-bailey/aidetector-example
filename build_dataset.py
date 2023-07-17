@@ -195,7 +195,8 @@ def generate_ai_output(inputtext, llm, tokens=128, inputprompt=None):
         except Exception as e:
             if "tokens exceed" in str(e):
                 inputtext = random.choice(storedinputtext.split('.'))
-                inputtext = inputtext[:int(len(inputtext/tokenshrink))]
+                upperbound=max(1,int(len(inputtext)/tokenshrink))
+                inputtext = inputtext[:upperbound]
                 tokenshrink+=1
                 output = None
     return output['choices'][0]['text']
