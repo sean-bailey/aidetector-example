@@ -194,14 +194,17 @@ def generate_ai_output(inputtext, llm, tokens=128, inputprompt=None):
                 inputprompt=baseinputprompt+inputtext+" A: "
 
             # Check if the total number of tokens exceeds the model's maximum token limit
-            total_tokens = len(llm.tokenizer.encode(inputprompt)) + tokens
+            #so OpenAI defined a token as about four characters in english. That's perfect. 
+            #token count will be an int of the length of the prompt /4.
+            total_tokens = int(len((inputprompt))/4) + tokens
             if total_tokens > max_tokens_limit:
 
-                inputtext = llm.tokenizer.decode(llm.tokenizer.encode(inputtext)[:max_tokens_limit-tokens])
+                inputtext = inputtext[:max_tokens_limit-tokens]
       
 
             output = llm(inputprompt, max_tokens=tokens, stop=["Q:"], echo=False)
         except Exception as e:
+            print(e)
             if "tokens exceed" in str(e):
                 max_tokens_limit=int(max_tokens_limit/2)
                 if max_tokens_limit <=tokens:
@@ -243,7 +246,7 @@ def select_model(modellist):
             if "really a GGML file" in str(e):
                 llm = None
                 os.remove(modelpath)
-
+    return llm
 def main():
     parser = argparse.ArgumentParser(description='Generate a dataset for aidetector')
     parser.add_argument('--filename', type=str, help='The name of the file to write', required=True)
